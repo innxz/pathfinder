@@ -1,0 +1,18 @@
+{
+  "name": "gta-pathfinder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:graph": "tsx scripts/build-graph.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "fflate": "^0.8.2",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0"
+  }
+}
