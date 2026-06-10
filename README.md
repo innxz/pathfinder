@@ -1,34 +1,36 @@
 # GTA Pathfinder
 
-Микросервис на TypeScript для расчёта **дорожного расстояния** между двумя 3D-точками в GTA V.
+TypeScript microservice for **road distance** between two 3D points in GTA V.
 
-Граф дорог строится из дампа [DurtyFree/gta-v-data-dumps](https://github.com/DurtyFree/gta-v-data-dumps) (`nodes.zip`). В рантайме — **0 production-зависимостей**, поиск маршрута через multi-anchor A*.
+The road graph is built from [DurtyFree/gta-v-data-dumps](https://github.com/DurtyFree/gta-v-data-dumps) (`nodes.zip`). Runtime has **zero production dependencies**; routing uses multi-anchor A*.
 
-## Зачем это нужно
+> Russian version: [README.ru.md](README.ru.md)
 
-Это не «ещё один A*», а **серверный сервис дорожной дистанции для GTA V** — в первую очередь для RAGE MP / FiveM и RP-серверов.
+## Why this exists
 
-Нативный `calculateTravelDistanceBetweenPoints` живёт в игровом процессе: его неудобно вызывать массово с бэкенда, централизованно кэшировать или использовать в Docker без online-игрока. Pathfinder даёт **один HTTP-контракт** для всех систем сервера: такси, доставка, квесты, античит, UI.
+This is not “yet another A* demo” — it is a **server-side road distance service for GTA V**, aimed at RAGE MP / FiveM and RP servers.
 
-**Две разные метрики в одном ответе:**
+Native `calculateTravelDistanceBetweenPoints` runs inside the game process: awkward to call in bulk from a backend, hard to cache centrally, and unusable in Docker without an online player. Pathfinder exposes **one HTTP contract** for taxi, delivery, quests, anti-cheat, UI, and anything else on your server.
 
-| Метрика | Для чего |
+**Two different metrics in one response:**
+
+| Field | Use case |
 |---|---|
-| `straightDistance` | Прямая 3D-дистанция — как «Точка маршрута (4181m)» на карте GTA в паузе |
-| `distance` | Длина маршрута **по дорогам** — для тарифов, таймеров, «сколько ехать» |
+| `straightDistance` | 3D straight line — same as “Route waypoint (4181m)” on the GTA pause map |
+| `distance` | **Road** route length — fares, timers, “how far to drive” |
 
-**Где проект полезен:**
+**Where it helps:**
 
-- серверная логика без клиента GTA (биллинг, матчмейкинг, валидация перемещений);
-- единая «истина» для расстояний на кастомном сервере;
-- быстрый расчёт с LRU-кэшем и предсказуемой latency.
+- server logic without a GTA client (billing, matchmaking, movement validation);
+- a single source of truth for distances on a custom server;
+- fast lookups with LRU cache and predictable latency.
 
-**Честные ограничения:**
+**Honest limits:**
 
-- это **не 100% замена** нативного GPS — по дорогам типичная погрешность **~5–7%** (см. [Точность](#точность));
-- потолок точности — **данные** (`nodes.json`), а не алгоритм; для <3% нужны **ynd** из CodeWalker;
+- **not a 100% native GPS replacement** — typical road error is **~5–7%** (see [Accuracy](#accuracy));
+- accuracy ceiling is **data** (`nodes.json`), not the algorithm; for <3% you need **ynd** from CodeWalker;
 
-## Архитектура
+## Architecture
 
 ```
 nodes.zip → scripts/build-graph.ts → data/graph.bin (~2.7 MB)
@@ -38,27 +40,27 @@ nodes.zip → scripts/build-graph.ts → data/graph.bin (~2.7 MB)
                               HTTP API (dist/index.js)
 ```
 
-При сборке Docker-образа `nodes.zip` скачивается автоматически, граф собирается внутри контейнера.
+When building the Docker image, `nodes.zip` is downloaded automatically and the graph is built inside the container.
 
-## Быстрый старт (Docker)
+## Quick start (Docker)
 
 ```bash
 docker compose up --build -d
 curl http://localhost:3005/health
 ```
 
-Сервис слушает **3005** на хосте (внутри контейнера — 3000).
+The service listens on **3005** on the host (**3000** inside the container).
 
-## Локальная разработка
+## Local development
 
 ```bash
 npm install
 
-# Скачать nodes.zip в корень проекта, затем:
+# Download nodes.zip into the project root, then:
 npm run build:graph -- nodes.zip data/graph.bin
 npm run build
 npm start
-# или
+# or
 npm run dev
 ```
 
@@ -66,7 +68,7 @@ npm run dev
 
 ### `GET /health`
 
-Проверка состояния и статистика графа.
+Health check and graph stats.
 
 ```json
 {
@@ -82,15 +84,15 @@ npm run dev
 
 ### `GET /distance`
 
-Query-параметры:
+Query parameters:
 
-| Параметр | Описание |
+| Parameter | Description |
 |---|---|
-| `fromX`, `fromY`, `fromZ` | Начальная точка |
-| `toX`, `toY`, `toZ` | Конечная точка |
-| `path=1` | Включить полилинию маршрута |
+| `fromX`, `fromY`, `fromZ` | Start point |
+| `toX`, `toY`, `toZ` | End point |
+| `path=1` | Include route polyline |
 
-Пример:
+Example:
 
 ```bash
 curl "http://localhost:3005/distance?fromX=215&fromY=-890&fromZ=30&toX=120&toY=-1800&toZ=30"
@@ -108,7 +110,7 @@ curl -s -X POST http://localhost:3005/distance \
   }'
 ```
 
-### Ответ
+### Response
 
 ```json
 {
@@ -123,100 +125,99 @@ curl -s -X POST http://localhost:3005/distance \
 }
 ```
 
-| Поле | Значение |
+| Field | Meaning |
 |---|---|
-| `distance` | Длина маршрута **по дорогам** (метры) |
-| `straightDistance` | Прямая 3D-дистанция между точками (метры) |
-| `fromNode`, `toNode` | ID ближайших узлов графа |
-| `pathNodes` | Количество узлов в маршруте |
-| `path` | Полилиния (если запрошена): `[from, ...nodes..., to]` |
-| `cached` | Результат взят из LRU-кэша |
-| `computeMs` | Время расчёта (мс) |
+| `distance` | **Road** route length (meters) |
+| `straightDistance` | 3D straight-line distance (meters) |
+| `fromNode`, `toNode` | Nearest graph node IDs |
+| `pathNodes` | Number of nodes in the route |
+| `path` | Polyline if requested: `[from, ...nodes..., to]` |
+| `cached` | Result served from LRU cache |
+| `computeMs` | Compute time (ms) |
 
-### Ошибки
+### Errors
 
-- `400` — неверные координаты или JSON
-- `404` — маршрут не найден (`{"error": "No route found between the points"}`)
-- `405` — неподдерживаемый HTTP-метод
+- `400` — invalid coordinates or JSON
+- `404` — no route found (`{"error": "No route found between the points"}`)
+- `405` — method not allowed
 
-## Точность
+## Accuracy
 
-На примере маршрута Los Santos → Sandy Shores:
+Example route: Los Santos → Sandy Shores
 
-| Источник | Значение | Что измеряет |
+| Source | Value | What it measures |
 |---|---|---|
-| Карта GTA («Точка маршрута») | ~4181 m | **Прямая** до waypoint, не длина GPS-линии |
-| `straightDistance` | ~4182 m | То же самое ✓ |
-| GTA native (`calculateTravelDistanceBetweenPoints`) | ~5295 m | По дорогам |
-| Этот сервис | ~5669 m | По дорогам (~+7%) |
+| GTA map (“Route waypoint”) | ~4181 m | **Straight line** to waypoint, not GPS path length |
+| `straightDistance` | ~4182 m | Same ✓ |
+| GTA native (`calculateTravelDistanceBetweenPoints`) | ~5295 m | By road |
+| This service | ~5669 m | By road (~+7%) |
 
-**Прямая дистанция** считается корректно. Расхождение ~5–7% — только в **дорожном** маршруте: JSON-дамп `nodes.json` — упрощённое представление навигационного графа GTA. Для точности <3% нужны бинарные **ynd**-файлы (CodeWalker), а не JSON.
+**Straight-line distance** is correct. The ~5–7% gap is only on **road** routes: the JSON dump `nodes.json` is a simplified view of GTA’s nav graph. For <3% you need binary **ynd** files (CodeWalker), not JSON.
 
-Для многих серверных сценариев (тариф такси ±10%, «квест не короче N км по дорогам») текущей точности **достаточно**. Для побития native GPS один в один — без ynd не обойтись.
+For many server use cases (taxi fare ±10%, “quest must be at least N km by road”) the current accuracy is **enough**. Matching native GPS 1:1 requires ynd.
 
-## Переменные окружения
+## Environment variables
 
-### Сервис
+### Service
 
-| Переменная | По умолчанию | Описание |
+| Variable | Default | Description |
 |---|---|---|
-| `PORT` | `3000` | Порт HTTP-сервера |
-| `GRAPH_PATH` | `data/graph.bin` | Путь к бинарному графу |
-| `CACHE_SIZE` | `10000` | Ёмкость LRU-кэша маршрутов |
+| `PORT` | `3000` | HTTP port |
+| `GRAPH_PATH` | `data/graph.bin` | Path to binary graph |
+| `CACHE_SIZE` | `10000` | LRU route cache capacity |
 
-### Сборка графа (`npm run build:graph`)
+### Graph build (`npm run build:graph`)
 
-| Переменная | По умолчанию | Описание |
+| Variable | Default | Description |
 |---|---|---|
-| `BRIDGE_MAX_DIST` | `30` | Мосты для тупиков (м) |
-| `GAP_BRIDGE_MAX_DIST` | `15` | Мосты между близкими разрывами (м) |
-| `GAP_BRIDGE_MAX_DEGREE` | `2` | Макс. степень узла для gap-мостов |
+| `BRIDGE_MAX_DIST` | `30` | Dead-end bridges (m) |
+| `GAP_BRIDGE_MAX_DIST` | `15` | Gap bridges between nearby breaks (m) |
+| `GAP_BRIDGE_MAX_DEGREE` | `2` | Max node degree for gap bridges |
 
-Пример:
+Example:
 
 ```bash
 BRIDGE_MAX_DIST=40 GAP_BRIDGE_MAX_DIST=20 npm run build:graph -- nodes.zip data/graph.bin
 ```
 
-## Сравнение с GTA (RAGE MP)
+## Compare with GTA (RAGE MP)
 
-В `tools/ragemp-compare/` — клиент и серверный пакет для сравнения с нативным GPS GTA.
+`tools/ragemp-compare/` includes client and server packages to compare against native GTA GPS.
 
-**Установка:**
+**Setup:**
 
-1. Скопировать `tools/ragemp-compare/packages/pathfinder-compare/` → `<server>/packages/pathfinder-compare/`
-2. Скопировать `tools/ragemp-compare/client_packages/pathfinder-compare/` → `<server>/client_packages/pathfinder-compare/`
-3. Подключить в `packages/index.js` и `client_packages/index.js`
-4. Задать `PATHFINDER_URL=http://127.0.0.1:3005/distance` (сервер должен достучаться до pathfinder)
+1. Copy `tools/ragemp-compare/packages/pathfinder-compare/` → `<server>/packages/pathfinder-compare/`
+2. Copy `tools/ragemp-compare/client_packages/pathfinder-compare/` → `<server>/client_packages/pathfinder-compare/`
+3. Require both in `packages/index.js` and `client_packages/index.js`
+4. Set `PATHFINDER_URL=http://127.0.0.1:3005/distance` (game server must reach pathfinder)
 
-**Команды в игре:**
+**In-game commands:**
 
-| Команда | Описание |
+| Command | Description |
 |---|---|
-| `/pfcoords` | Координаты игрока и waypoint |
-| `/pfcompare` | Сравнение GTA native vs сервис |
-| `/pfshow` | Отрисовка маршрута сервиса (красная линия) |
-| `/pfhide` | Скрыть линию |
+| `/pfcoords` | Player and waypoint coordinates |
+| `/pfcompare` | GTA native vs service |
+| `/pfshow` | Draw service route (red lines) |
+| `/pfhide` | Hide drawn route |
 
-## Структура проекта
+## Project layout
 
 ```
 src/
-  index.ts       — HTTP-сервер
-  graph.ts       — загрузка graph.bin, spatial lookup
+  index.ts       — HTTP server
+  graph.ts       — graph.bin loader, spatial lookup
   pathfinder.ts  — multi-source/multi-target A*
-  cache.ts       — LRU-кэш по координатам (округление 0.1 m)
-  types.ts       — типы и константы графа
+  cache.ts       — LRU cache by coordinates (0.1 m rounding)
+  types.ts       — types and graph constants
 scripts/
-  build-graph.ts — препроцессор nodes.json → graph.bin
+  build-graph.ts — nodes.json → graph.bin preprocessor
 tools/
-  compare.sh     — CLI-тест API
-  ragemp-compare/ — интеграция с RAGE MP
+  ragemp-compare/ — RAGE MP integration
 ```
 
-## Алгоритм
+## Algorithm
 
-1. Точки «привязываются» к нескольким ближайшим узлам графа (multi-anchor snap).
-2. A* ищет кратчайший путь между комбинациями start/end узлов.
-3. Веса рёбер — 2D-расстояние `hypot(dx, dy)` (как у GTA GPS).
-4. При сборке графа добавляются мосты для тупиков и мелких разрывов в дампе.
+1. Points snap to several nearest graph nodes (multi-anchor snap).
+2. A* finds the shortest path across start/end node combinations.
+3. Edge weights use 2D `hypot(dx, dy)` (similar to GTA GPS).
+4. Graph build adds bridges for dead ends and small gaps in the dump.
